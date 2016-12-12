@@ -54,7 +54,7 @@ def load_semeval_sents(filename):
 def train_with_test_data(w2v_model, tf_weight):
     # -1 mean row for padding
     w2v_model.syn0 = tf_weight[:w2v_model.syn0.shape[0], :]
-    sents = load_semeval_sents(utils.base_path + '/test_xml/EN_REST_SB1_TEST.xml')
+    sents = load_semeval_sents(utils.base_path + '/test_xml/16_res_test.xml_')
     w2v_model.build_vocab(sentences=sents, update=True)
     w2v_model.train(sents)
     return w2v_model

@@ -9,71 +9,50 @@ import utils
 import constants
 import attention_based_rnn
 from gensim.models import word2vec
-from sklearn.model_selection import RandomizedSearchCV
-train_filename = 'train_xml/ABSA16_Restaurants_Train_SB1_v2.xml'
-test_filename = 'test_xml/EN_REST_SB1_TEST.xml'
+
+train_filename = 'train_xml/15_res_train.xml'
+test_filename = 'test_xml/15_res_test.xml'
 gensim_model = word2vec.Word2Vec.load(utils.base_path + '/saved_models/w2v_first114808.gensim')
-# mapping word -> idx
 max_vocab = int(len(gensim_model.vocab) * 1.1)
 padding_idx = len(gensim_model.vocab)
 
 
-def make_vocab(reviews, reusable_vocab=None):
-    """
-    vocab[0] raises Exception.
-    idx=0 is padding value
-    """
-    vocab = reusable_vocab or {}
-    idx = 1 if reusable_vocab is None else len(reusable_vocab)
-    for review in reviews:
-        for tok in review.tokens:
-            if tok not in vocab:
-                vocab[tok] = idx
-                idx += 1
-    return vocab
-
-
-def train_fool(sess):
+def train(hyper_params):
     reviews, ent2idx, attr2idx, polarity2idx = load_semeval_reviews(train_filename, is_test_file=False)
+    ent_lookup, attr_lookup = make_ent_attr_lookup(reviews, gensim_model.vocab,
+                                                   lambda x: gensim_model.syn0[x], ent2idx, attr2idx)
 
-    rows = []
+    model = attention_based_rnn.AttentionBasedRNN(n_vocab=max_vocab)
+    model.set_params(**hyper_params)
+
+    # list of (ids, ent, attr, pol)
+    tuples = []
     for review in reviews:
         ids = [gensim_model.vocab[tok].index for tok in review.tokens]
-        sent_len = len(ids) if len(ids) < constants.max_sent_len else constants.max_sent_len
-        ids = list(utils.pad_sequence(ids, constants.max_sent_len, padding_idx))
-        rows.extend([np.concatenate([ids + [ent2idx[op.ent],
-                                            attr2idx[op.attr],
-                                            sent_len,
-                                            polarity2idx[op.polarity]]], axis=-1) for op in review.opinions])
+        tuples_ = [(ids, ent2idx[op.ent], attr2idx[op.attr], polarity2idx[op.polarity]) for op in review.opinions]
+        tuples.extend(tuples_)
 
-    inputs = np.array(rows, dtype='int32')
-    x = inputs[:, :-1]
-    y = inputs[:, -1]
+    unzipped = zip(*tuples)
+    ids = utils.pad_sequences_(unzipped[0], maxlen=constants.max_sent_len)
+    ents, attrs, pols = [np.array(x, dtype='int32') for x in unzipped[1:]]
+    sent_lens = np.array(map(lambda x: len(x) if len(x) < constants.max_sent_len else constants.max_sent_len, unzipped[0]), dtype='int32')
 
-    additional_rows = np.random.uniform(-1., 1., size=(max_vocab-gensim_model.syn0.shape[0], constants.word_vec_dim))
-    attRNN = attention_based_rnn.AttentionBasedRNN(sess=sess,
-                                                   vec_dim=constants.word_vec_dim,
-                                                   n_vocab=max_vocab,
-                                                   n_ent=len(ent2idx),
-                                                   n_attr=len(attr2idx),
-                                                   max_sent_len=constants.max_sent_len,
-                                                   embedding_weight=np.vstack((gensim_model.syn0, additional_rows)))
+    graph = tf.Graph()
+    with graph.as_default():
+        model.build_graph(constants.n_entity, constants.n_attr, constants.word_vec_dim, constants.n_label)
+        init_op = tf.global_variables_initializer()
 
-    param_dict = {
-        'lr': np.exp(np.random.uniform(math.log(0.0006), math.log(0.005), 100)),
-        'epoch': list(range(32)),
-        'activation': ['hard_sigmoid', 'softmax', 'sigmoid'],
-        'rnn_dim': [32, 64, 128, 256],
-        'batch_size': [8, 16, 32, 64, 128],
-        'n_filter': [16, 32, 64, 128, 258],
-        'ent_vec_dim': [8, 16, 32, 64, 128],
-        'attr_vec_dim': [8, 16, 32, 64, 128],
-        'pool_len': [3],
-        'filter_len': [5, 7]}
+    additional_rows = np.random.uniform(-1., 1., size=(max_vocab-len(gensim_model.syn0), constants.word_vec_dim))
 
-    RandomizedSearchCV(attRNN, param_dict, n_iter=2, scoring=attRNN.eval).fit(x, y)
+    with tf.Session(graph=graph).as_default() as sess:
+        sess.run(init_op)
+        # train
+        model.fit(sess, ids, ents, attrs,
+                  sent_lens, utils.to_categorical(pols),
+                  np.vstack((gensim_model.syn0, additional_rows)),
+                  ent_lookup, attr_lookup)
 
-    return attRNN
+    return model
 
 
 def update_embedding(attLSTM, sess):
@@ -90,12 +69,8 @@ def update_embedding(attLSTM, sess):
     gensim_model = new_gensim_model
 
 
-def test(attRNN):
-
+def test(model):
     reviews, ent2idx, attr2idx, polarity2idx = load_semeval_reviews(test_filename, is_test_file=True)
-
-    # vocab = make_vocab(reviews, reusable_vocab=train_vocab)
-    # print len(vocab), 'vocab'
 
     # list of (ids, ent, attr, pol)
     tuples = []
@@ -105,13 +80,12 @@ def test(attRNN):
         tuples.extend(tuples_)
 
     unzipped = zip(*tuples)
-    ids = utils.pad_sequences(unzipped[0], maxlen=constants.max_sent_len, value=padding_idx)
+    ids = utils.pad_sequences_(unzipped[0], maxlen=constants.max_sent_len, value=padding_idx)
     sent_lens = np.array(map(lambda x: len(x) if len(x) < constants.max_sent_len else constants.max_sent_len, unzipped[0]), dtype='int32')
-    # sent_lens /= 2
     ents, attrs, pols = (np.array(x, dtype='int32') for x in unzipped[1:])
 
-    acc = attRNN.eval(ids, ents, attrs, sent_lens, pols)
-    print 'test accuracy', acc
+    acc = model.eval(ids, ents, attrs, sent_lens, pols)
+    utils.logger.warning('test accuracy', acc)
 
 
 def random_search_cv(n_iter):
@@ -124,21 +98,26 @@ def random_search_cv(n_iter):
 
     # list of (ids, ent, attr, pol)
     tuples = []
+    omitted = 0
     for review in reviews:
-        ids = [gensim_model.vocab[tok].index for tok in review.tokens]
-        tuples_ = [(ids, ent2idx[op.ent], attr2idx[op.attr], polarity2idx[op.polarity]) for op in review.opinions]
+        # if len(review.tokens) <= 1:
+        #     omitted += 1
+        #     continue
+        ids_list = [gensim_model.vocab[tok].index for tok in review.tokens]
+        tuples_ = [(ids_list, ent2idx[op.ent], attr2idx[op.attr], polarity2idx[op.polarity]) for op in review.opinions]
         tuples.extend(tuples_)
 
+    print 'omitted {}/{} sentences'.format(omitted, len(reviews))
     unzipped = zip(*tuples)
-    ids = utils.pad_sequences_(unzipped[0], maxlen=constants.max_sent_len)
+    ids_list = utils.pad_sequences_(unzipped[0], maxlen=constants.max_sent_len)
     ents, attrs, pols = [np.array(x, dtype='int32') for x in unzipped[1:]]
     sent_lens = np.array(map(lambda x: len(x) if len(x) < constants.max_sent_len else constants.max_sent_len, unzipped[0]), dtype='int32')
 
     def cv(hyper_params):
         print hyper_params
-        fold = 2
+        fold = 5
 
-        perm = np.random.permutation(len(ids))
+        perm = np.random.permutation(len(ids_list))
         chunk_size = len(perm)/fold
         chunks = np.split(perm, [chunk_size * (i+1) for i, a in enumerate(range(fold))])
 
@@ -156,7 +135,7 @@ def random_search_cv(n_iter):
             test_indices = chunks[i]
             train_indices = np.array(list(set(perm) - set(test_indices)))
 
-            ids_train, ids_val = ids[train_indices, :], ids[test_indices, :]
+            ids_train, ids_val = ids_list[train_indices, :], ids_list[test_indices, :]
             ent_train, ent_val = ents[train_indices], ents[test_indices]
             attr_train, attr_val = attrs[train_indices], attrs[test_indices]
             pol_train, pol_val = pols[train_indices], pols[test_indices]
@@ -173,34 +152,35 @@ def random_search_cv(n_iter):
 
                 # validate
                 acc = model.eval(sess, ids_val, ent_val, attr_val, lens_val, utils.to_categorical(pol_val))
-                print 'validation {}/{} acc: {}'.format(i+1, fold, acc)
+                utils.logger.warning('validation {}/{} acc: {}'.format(i+1, fold, acc))
                 acc_total += acc
 
+        utils.logger.warning('validation for current params end: {}'.format(acc_total / fold))
         return acc_total / fold
 
-    sampler = ParameterSampler({
-        'attn_score_func': ['hard_sigmoid', 'softmax', 'sigmoid'],
+    sampler = list(ParameterSampler({
+        'attn_score_func': ['h_sigmoid', 'sigmoid'],
         'lr': np.exp(np.random.uniform(math.log(0.0006), math.log(0.005), 1000)),
-        'w_decay_factor': [10 ** np.random.uniform(-8, -4) for _ in range(1000)],
+        'w_decay_factor': [10 ** np.random.uniform(-6, -4) for _ in range(1000)],
         'rnn_dim': [32, 64, 128, 256],
-        'batch_size': [8, 16, 32, 64],
-        'n_filter': [32, 64, 128, 258],
-        'ent_vec_dim': [8, 16, 32, 64, 128],
-        'attr_vec_dim': [8, 16, 32, 64, 128],
-        'pool_len': [1, 2, 3],
-        'filter_len': [3, 5, 7]}, n_iter=n_iter)
+        'batch_size': [16, 32, 64],
+        'n_filter': [64, 128, 256],
+        'ent_vec_dim': [32, 64, 128],
+        'attr_vec_dim': [32, 64, 128],
+        'pool_len': [1],
+        'filter_len': [3, 5]}, n_iter=n_iter))
 
     scores = np.array(map(cv, sampler))
 
     # print all result
     for i, param in enumerate(sampler):
-        print scores[i], param
+        utils.logger.log(scores[i], param)
+    import pickle
+    with open('cv_result.pkl', mode='wb') as f:
+        pickle.dump(sampler[scores.argmax()], f)
 
     # print best result
-    import pickle
-    print 'best params:', scores.argmax(), list(sampler)[scores.argmax()]
-    with open('best_params.pkl', mode='wb') as f:
-        pickle.dump(list(sampler)[scores.argmax()], f)
+    utils.logger.warning('best params: {}, {}'.format(scores.argmax(), str(sampler[scores.argmax()])))
 
 if __name__ == '__main__':
     random_search_cv(n_iter=3)

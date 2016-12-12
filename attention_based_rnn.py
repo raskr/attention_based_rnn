@@ -115,7 +115,7 @@ class AttentionBasedRNN(BaseEstimator):
         def attn_score(string):
             if string == 'sigmoid':
                 return tf.nn.sigmoid
-            elif string == 'hard_sigmoid':
+            elif string == 'h_sigmoid':
                 return K.hard_sigmoid
             elif string == 'softmax':
                 return tf.nn.softmax
@@ -171,7 +171,7 @@ class AttentionBasedRNN(BaseEstimator):
         # ---------
         # variables
         # ---------
-        # for embedding
+        # for embedding (values will be override by `assign`)
         self.embed_tok = tf.Variable(tf.random_uniform((self.n_vocab, vec_dim)))
         self.embed_ent = tf.Variable(tf.random_uniform((n_ent, vec_dim)))
         self.embed_attr = tf.Variable(tf.random_uniform((n_attr, vec_dim)))
@@ -185,10 +185,13 @@ class AttentionBasedRNN(BaseEstimator):
         # for conv
         Wc = xavier_init((self.filter_len, vec_dim, 1, self.n_filter), name='Wc')
         bc = tf.Variable(tf.zeros((self.n_filter,)))
+        # before prediction
+        Wx = xavier_init((self.rnn_dim, self.rnn_dim), name='Wx')
+        Wp = xavier_init((self.rnn_dim, self.rnn_dim), name='Wp')
         # for prediction
         Ws = xavier_init((self.rnn_dim, label_num), name='Ws')
         bs = tf.Variable(tf.zeros((label_num,)))
-        rnn_unit = tf.nn.rnn_cell.BasicLSTMCell(num_units=self.rnn_dim)
+        rnn_unit = tf.nn.rnn_cell.LSTMCell(num_units=self.rnn_dim)
 
         # ----
         # flow
@@ -225,19 +228,37 @@ class AttentionBasedRNN(BaseEstimator):
             concat_ent = tf.concat(2, [ents, hs]) # hs: 36
             concat_attr = tf.concat(2, [attrs, hs])
 
-            score = attn_score(self.attn_score_func)
+            score_func = attn_score(self.attn_score_func)
 
+            # core flow
             def compute_ctx_vec(batch_idx_and_sent_len):
                 idx, sent_len = batch_idx_and_sent_len[0], batch_idx_and_sent_len[1]
                 trimmed_ent = tf.squeeze(tf.slice(concat_ent, [idx, 0, 0], [1, sent_len, -1]), [0])
                 trimmed_attr = tf.squeeze(tf.slice(concat_attr, [idx, 0, 0], [1, sent_len, -1]), [0])
-                attn_ent = score(tf.matmul(trimmed_ent, Wa_ent))
-                attn_attr = score(tf.matmul(trimmed_attr, Wa_attr))
-                attn = attn_ent * attn_attr # (sent, 1)
+                attn_ent = score_func(tf.matmul(trimmed_ent, Wa_ent))
+                attn_attr = score_func(tf.matmul(trimmed_attr, Wa_attr))
+                # (sent, 1)
+                attn = attn_ent * attn_attr
 
-                hs_trimmed = tf.squeeze(tf.slice(hs, [idx, 0, 0], [1, sent_len, -1]), [0]) # (sent, rnn_dim)
-                ctx_vec = tf.matmul(hs_trimmed, attn, transpose_a=True) # (rnn_dim, 1)
-                return tf.squeeze(ctx_vec, [1]) # (rnn_dim,)
+                # (sent, rnn_dim)
+                hs_trimmed = tf.squeeze(tf.slice(hs, [idx, 0, 0], [1, sent_len, -1]), [0])
+                # (rnn_dim, 1)
+                ctx_vec = tf.transpose(tf.matmul(hs_trimmed, attn, transpose_a=True))
+
+                a = tf.matmul(ctx_vec, Wp)
+                # ERROR when slicing
+                # b = tf.matmul(tf.slice(hs_trimmed, [sent_len-1, 0], [1, -1]), Wx)
+                b = tf.matmul(tf.expand_dims(hs_trimmed[sent_len-1, :], 0), Wx)
+                print hs_trimmed.get_shape()
+                print 'a', a.get_shape()
+                print 'b', b.get_shape()
+                print 'ctx_vec', ctx_vec.get_shape()
+                ctx_vec = tf.nn.tanh(tf.squeeze(a, [0]) + tf.squeeze(b, [0]))
+                # ctx_vec = tf.nn.tanh(a + b)
+                # (rnn_dim,)
+
+                # ctx_vec = tf.squeeze(ctx_vec, [0])
+                return ctx_vec
 
             sequence = tf.stack([tf.range(self.b_size_ph), self.sent_len_ph], axis=1)
             context_vec = tf.map_fn(compute_ctx_vec, sequence, dtype=tf.float32) # (batch, rnn_dim)
@@ -247,14 +268,14 @@ class AttentionBasedRNN(BaseEstimator):
 
         # weight decay
         regularize = \
-            tf.nn.l2_loss(self.embed_tok) + \
-            tf.nn.l2_loss(self.embed_ent) + \
-            tf.nn.l2_loss(self.embed_attr) + \
             tf.nn.l2_loss(Went) + \
             tf.nn.l2_loss(Wattr) + \
             tf.nn.l2_loss(Wa_ent) + \
             tf.nn.l2_loss(Wa_attr) + \
             tf.nn.l2_loss(Ws)
+            # tf.nn.l2_loss(self.embed_tok) + \
+            # tf.nn.l2_loss(self.embed_ent) + \
+            # tf.nn.l2_loss(self.embed_attr) + \
 
         self.loss = tf.reduce_mean(sce) + self.w_decay_factor * regularize
 

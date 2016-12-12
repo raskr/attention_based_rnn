@@ -4,8 +4,14 @@ import random
 import os
 import re
 import numpy as np
+from logging import getLogger, StreamHandler, DEBUG
 
 base_path = os.path.dirname(os.path.abspath(__file__))
+logger = getLogger(__name__)
+handler = StreamHandler()
+handler.setLevel(DEBUG)
+logger.setLevel(DEBUG)
+logger.addHandler(handler)
 
 
 def train_val_split(seq, test_idx, fold=None,):

@@ -1,8 +1,6 @@
 import xml.etree.ElementTree as Parser
 import utils
-from logging import getLogger
 from nltk.tokenize import word_tokenize as tokenize
-logger = getLogger(__name__)
 
 
 class Opinion:
@@ -41,18 +39,14 @@ def load_semeval_reviews(filename, is_test_file):
 
     reviews = []
 
-    for sent in Parser.parse(filename).getroot().findall('.//sentence'):
+    sents = Parser.parse(filename).getroot().findall('.//sentence')
+    print 'len of <sentences>:', len(sents)
 
+    for i, sent in enumerate(sents):
         text = sent.find('text').text
         opinions = sent.find('Opinions')
 
         if opinions is None:
-            if is_test_file:
-                logger.fatal("sentence doesn't contain any Opinions")
-                logger.fatal('text: '.format(text))
-            else:
-                logger.warning("sentence doesn't contain any Opinions")
-                logger.warning('text: '.format(text))
             continue
 
         ops = []
@@ -65,10 +59,6 @@ def load_semeval_reviews(filename, is_test_file):
 
         if len(ops) >= 1:
             reviews.append(Review(text, ops))
-        elif is_test_file:
-            logger.fatal("Opinions doesn't have any Opinion")
-        else:
-            logger.warning("Opinions doesn't have any Opinion")
 
     ents = set()
     attrs = set()
