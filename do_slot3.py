@@ -167,4 +167,4 @@ def random_search_cv(n_iter):
     utils.log('best params: {}, {}'.format(scores.argmax(), str(sampler[scores.argmax()])), True)
 
 if __name__ == '__main__':
-    random_search_cv(n_iter=2)
+    random_search_cv(n_iter=256)

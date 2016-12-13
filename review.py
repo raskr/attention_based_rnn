@@ -79,10 +79,9 @@ def load_semeval_reviews(filename, is_test_file):
 def ent_attr_to_words(reviews, word2idx, not_covered):
     from nltk.corpus import stopwords
     from collections import defaultdict
-    # from nltk.tag import pos_tag
-    stopwords = set(stopwords.words('english'))
-    stopwords.add('I')
-    # sw_ids = set([vocab[sw].index for sw in stopwords])
+    import constants
+
+    stopwords = constants.stopwords
 
     # e.g. {'FOOD': set(4, 6, 8)}
     ent_map = defaultdict(set)
