@@ -76,7 +76,7 @@ def load_semeval_reviews(filename, is_test_file):
 
 
 
-def ent_attr_to_words(reviews, word2idx):
+def ent_attr_to_words(reviews, word2idx, not_covered):
     from nltk.corpus import stopwords
     from collections import defaultdict
     # from nltk.tag import pos_tag
@@ -102,12 +102,14 @@ def ent_attr_to_words(reviews, word2idx):
         # add ids to ent_map
         for ent in ents:
             for id_ in review.ids:
-                ent_map[ent].add(id_)
+                if id_ not in not_covered:
+                    ent_map[ent].add(id_)
 
         # add ids to attr_map
         for attr in attrs:
             for id_ in review.ids:
-                attr_map[attr].add(id_)
+                if id_ not in not_covered:
+                    attr_map[attr].add(id_)
 
     for k, v in ent_map.items():
         print k, 'contains', len(v), 'words'
@@ -115,21 +117,24 @@ def ent_attr_to_words(reviews, word2idx):
     for k, v in attr_map.items():
         print k, 'contains', len(v), 'words'
 
+    print '\n'
+
     return ent_map, attr_map
 
 
-def make_ent_attr_lookup(reviews, word2idx, id2vec, ent2idx, attr2idx):
+def make_ent_attr_lookup(reviews, word2idx, id2vec, ent2idx, attr2idx, not_covered):
     import numpy as np
     from operator import itemgetter
     # e.g. {'FOOD': set(4, 6, 8)}
-    ent2words, attr2words = ent_attr_to_words(reviews, word2idx)
+    ent2words, attr2words = ent_attr_to_words(reviews, word2idx, not_covered)
 
+    # sort by ent/attr ID
     # [(X1, vec), (X2, vec), ...]
-    pairs1 = sorted([(ent2idx[k], reduce(np.add, map(id2vec, v)))
-                     for k, v in ent2words.items()], key=itemgetter(0))
+    pairs1 = sorted([(ent2idx[e], reduce(np.add, map(id2vec, ws)))
+                     for e, ws in ent2words.items()], key=itemgetter(0))
 
-    pairs2 = sorted([(attr2idx[k], reduce(np.add, map(id2vec, v)))
-                     for k, v in attr2words.items()], key=itemgetter(0))
+    pairs2 = sorted([(attr2idx[a], reduce(np.add, map(id2vec, ws)))
+                     for a, ws in attr2words.items()], key=itemgetter(0))
 
     return np.array([pair[1] for pair in pairs1]), \
            np.array([pair[1] for pair in pairs2])

@@ -6,7 +6,7 @@ n_entity = 6
 n_attr = 5
 n_label = 3
 
-year = 2016
+year = 2015
 
 base_path = os.path.dirname(os.path.abspath(__file__))
 

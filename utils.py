@@ -1,4 +1,6 @@
 import math
+from nltk.tokenize import word_tokenize as tokenize
+import xml.etree.ElementTree as Parser
 import os
 import re
 import numpy as np
@@ -50,8 +52,8 @@ def pad_sequence(s, maxlen=None, value=0):
     return x
 
 
-def pad_sequences_(sequences, maxlen=None, dtype='int32', padding='post', truncating='post', value=0):
-    """ copied from keras.preprocessing.sequence.pad_sequence()
+def pad_sequences(sequences, maxlen=None, dtype='int32', padding='post', truncating='post', value=0):
+    """ copy from keras.preprocessing.sequence.pad_sequence()
     """
     lengths = [len(s) for s in sequences]
 
@@ -112,8 +114,8 @@ def filter_symbol_1(sent):
     return filter(lambda x: x != '', map(filter_symbol_w, sent))
 
 
+r = re.compile(u'\.+')
 def filter_symbol(sent):
-    r = re.compile(u'\.+')
     sw = [u',', u':', u';', u"''", u'"', u'\'', u'?', u'!', u')', u'(', u'*', u'\u2013', u'-']
     dst = filter(lambda w: w not in sw, sent)
     dst = filter(lambda x: not r.match(x), dst)
@@ -124,17 +126,25 @@ def to_lower(sent):
     return [w.lower() if w != 'I' else w for w in sent]
 
 
+def load_semeval_sents(filename):
+    sents = []
+    for review in Parser.parse(filename).getroot().findall('.//sentence'):
+        sent = tokenize(review.find('text').text)
+        sent = to_lower(sent)
+        sent = filter_symbol(sent)
+        sents.append(sent)
+    return sents
+
+
 def load_embedding_weights():
     vector_file = constants.base_path + '/saved_models/vectors{}.txt'.format(constants.year)
     assert os.path.exists(vector_file)
 
-    words = []
     with open(vector_file, 'r') as infile:
         header = str(infile.readline())
         vocab_size, vec_dim = map(int, header.strip().split())
-        # first vector denotes padding
-        vectors = [np.zeros((vec_dim,))]
 
+        words, vectors = [], []
         for line in infile.readlines():
             parts = str(line).rstrip().split(" ")
             assert len(parts) == 1 + vec_dim
@@ -142,7 +152,23 @@ def load_embedding_weights():
             vectors.append(vec)
             words.append(word)
 
-    # index 0 is vectors for padding
-    word2idx = {word: i for i, word in zip(range(1, len(words) + 1), words)}
+    # --- words and vectors from google news were created,
+    # --- but this will make cache miss on semeval dataset.
 
-    return word2idx, np.array(vectors)
+    semeval_sents = load_semeval_sents(constants.train_filename) +\
+                    load_semeval_sents(constants.test_filename)
+
+    semeval_words = []
+    for sent in semeval_sents:
+        semeval_words.extend(sent)
+
+    not_covered = set(semeval_words) - set(words)
+    print '{}% of words was covered'.format(100.*(1. - float(len(not_covered))/len(set(semeval_words))))
+    words.extend(list(not_covered))
+    vectors.extend([np.random.uniform(-1., 1., vec_dim) for _ in range(len(not_covered))])
+
+    # index 0 is for padding vector
+    word2idx = {word: i for i, word in zip(range(1, len(words) + 1), words)}
+    vectors.insert(0, np.zeros((vec_dim,)))
+
+    return word2idx, np.asarray(vectors), [word2idx[w] for w in not_covered]

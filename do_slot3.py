@@ -2,20 +2,22 @@ import tensorflow as tf
 from sklearn.model_selection import ParameterSampler
 import math
 import numpy as np
+
 from review import load_semeval_reviews
 from review import make_ent_attr_lookup
 import utils
 import constants
 import attention_based_rnn
 
-word2idx, embedding_w = utils.load_embedding_weights()
-max_vocab = len(word2idx) + 1
+word2idx, embedding_w, not_covered = utils.load_embedding_weights()
+max_vocab = len(embedding_w)
 
 
 def train(hyper_params):
     reviews, ent2idx, attr2idx, polarity2idx = load_semeval_reviews(constants.train_filename, is_test_file=False)
     ent_lookup, attr_lookup = make_ent_attr_lookup(reviews, word2idx,
-                                                   lambda x: embedding_w[x], ent2idx, attr2idx)
+                                                   lambda x: embedding_w[x],
+                                                   ent2idx, attr2idx, not_covered)
 
     model = attention_based_rnn.AttentionBasedRNN(n_vocab=max_vocab)
     model.set_params(**hyper_params)
@@ -28,7 +30,7 @@ def train(hyper_params):
         tuples.extend(tuples_)
 
     unzipped = zip(*tuples)
-    ids = utils.pad_sequences_(unzipped[0], maxlen=constants.max_sent_len)
+    ids = utils.pad_sequences(unzipped[0], maxlen=constants.max_sent_len)
     ents, attrs, pols = [np.array(x, dtype='int32') for x in unzipped[1:]]
     sent_lens = np.array(map(lambda x: len(x) if len(x) < constants.max_sent_len else constants.max_sent_len, unzipped[0]), dtype='int32')
 
@@ -59,7 +61,7 @@ def test(model):
         tuples.extend(tuples_)
 
     unzipped = zip(*tuples)
-    ids = utils.pad_sequences_(unzipped[0], maxlen=constants.max_sent_len)
+    ids = utils.pad_sequences(unzipped[0], maxlen=constants.max_sent_len)
     sent_lens = np.array(map(lambda x: len(x) if len(x) < constants.max_sent_len else constants.max_sent_len, unzipped[0]), dtype='int32')
     ents, attrs, pols = (np.array(x, dtype='int32') for x in unzipped[1:])
 
@@ -71,7 +73,8 @@ def random_search_cv(n_iter):
     reviews, ent2idx, attr2idx, polarity2idx = load_semeval_reviews(constants.train_filename, is_test_file=False)
 
     ent_lookup, attr_lookup = make_ent_attr_lookup(reviews, word2idx,
-                                                   lambda x: embedding_w[x], ent2idx, attr2idx)
+                                                   lambda x: embedding_w[x],
+                                                   ent2idx, attr2idx, not_covered)
 
     model = attention_based_rnn.AttentionBasedRNN(n_vocab=max_vocab)
 
@@ -88,7 +91,7 @@ def random_search_cv(n_iter):
 
     print 'omitted {}/{} sentences'.format(omitted, len(reviews))
     unzipped = zip(*tuples)
-    ids_list = utils.pad_sequences_(unzipped[0], maxlen=constants.max_sent_len)
+    ids_list = utils.pad_sequences(unzipped[0], maxlen=constants.max_sent_len)
     ents, attrs, pols = [np.array(x, dtype='int32') for x in unzipped[1:]]
     sent_lens = np.array(map(lambda x: len(x) if len(x) < constants.max_sent_len else constants.max_sent_len, unzipped[0]), dtype='int32')
 
@@ -137,15 +140,17 @@ def random_search_cv(n_iter):
         return acc_total / fold
 
     sampler = list(ParameterSampler({
-        'attn_score_func': ['h_sigmoid', 'sigmoid'],
-        'lr': np.exp(np.random.uniform(math.log(0.0006), math.log(0.005), 1000)),
-        'w_decay_factor': [10 ** np.random.uniform(-5, -2) for _ in range(1000)],
-        'rnn_dim': [32, 64, 128, 200, 256],
+        'cell_clip': [None],
+        'rnn_unit': ['BasicLSTM', 'LSTM', 'GRU'],
+        'attn_score_func': ['h_sigmoid'],
+        'lr': np.exp(np.random.uniform(math.log(0.0006), math.log(0.005), 1024)),
+        'w_decay_factor': [10 ** np.random.uniform(-5, -2) for _ in range(1024)],
+        'rnn_dim': [32, 64, 128, 200, 256, 512],
         'batch_size': [16, 32, 64],
-        'n_filter': [64, 128, 200, 256],
-        'ent_vec_dim': [32, 64, 128],
-        'use_convolution': [True],
-        'attr_vec_dim': [32, 64, 128],
+        'n_filter': [64, 128, 200, 256, 512],
+        'ent_vec_dim': [32, 64, 128, 200, 256, 512],
+        'use_convolution': [True, False],
+        'attr_vec_dim': [32, 64, 128, 200, 256, 512],
         'pool_len': [1],
         'filter_len': [3, 5]}, n_iter=n_iter))
 
@@ -162,4 +167,4 @@ def random_search_cv(n_iter):
     utils.log('best params: {}, {}'.format(scores.argmax(), str(sampler[scores.argmax()])), True)
 
 if __name__ == '__main__':
-    random_search_cv(n_iter=3)
+    random_search_cv(n_iter=2)

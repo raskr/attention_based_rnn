@@ -1,20 +1,6 @@
 import os.path
 import sys
-from nltk.tokenize import word_tokenize as tokenize
-import xml.etree.ElementTree as Parser
-
-import utils
 import constants
-
-
-def load_semeval_sents(filename):
-    sents = []
-    for review in Parser.parse(filename).getroot().findall('.//sentence'):
-        sent = tokenize(review.find('text').text)
-        sent = utils.to_lower(sent)
-        sent = utils.filter_symbol(sent)
-        sents.append(sent)
-    return sents
 
 
 def make_vectors_from_google_news(trained_vector_file_path,
@@ -65,9 +51,7 @@ def make_vectors_from_google_news(trained_vector_file_path,
         for word in words:
             if word in mapping:
                 vec = mapping[word]
-            else:
-                vec = np.random.uniform(-1., 1., vec_dim)
-            outfile.write(("%s %s\n" % (word, ' '.join("%f" % val for val in vec))).encode('utf8'))
+                outfile.write(("%s %s\n" % (word, ' '.join("%f" % val for val in vec))).encode('utf8'))
         print 'vectors{}.txt has been created in saved_models/'.format(constants.year)
 
 

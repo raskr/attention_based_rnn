@@ -2,7 +2,6 @@ import tensorflow as tf
 from tensorflow.contrib.layers import xavier_initializer
 import constants
 import numpy as np
-import keras.backend.tensorflow_backend as K
 from sklearn.base import BaseEstimator
 
 
@@ -21,18 +20,22 @@ class AttentionBasedRNN(BaseEstimator):
         self.rnn_dim = None
         self.batch_size = None
         self.pool_len = None
-        self.epoch = 4 # constant while cv
+        self.epoch = 3 # constant while cv
         self.lr = None
         self.n_filter = None
         self.ent_vec_dim = None
         self.attr_vec_dim = None
         self.filter_len = None
+        self.cell_clip = None
+        self.rnn_unit = None
 
         self.use_attention = True
-        self.use_convolution = False
+        self.use_convolution = True
 
     def get_params(self, deep=False):
         return {
+            'cell_clip': self.cell_clip,
+            'rnn_unit': self.rnn_unit,
             'attn_score_func': self.attn_score_func,
             'lr': self.lr,
             'w_decay_factor': self.w_decay_factor,
@@ -93,13 +96,11 @@ class AttentionBasedRNN(BaseEstimator):
 
     def build_graph(self, n_ent, n_attr, vec_dim, label_num):
 
-        def attn_score(string):
-            if string == 'sigmoid':
-                return tf.nn.sigmoid
-            elif string == 'h_sigmoid':
-                return K.hard_sigmoid
-            elif string == 'softmax':
-                return tf.nn.softmax
+        def hard_sigmoid(x):
+            x = (0.2 * x) + 0.5
+            zero = tf.convert_to_tensor(0., tf.float32)
+            one = tf.convert_to_tensor(1., tf.float32)
+            return tf.clip_by_value(x, zero, one)
 
         def repeat(x, times, axis):
             x_shape = x.get_shape().as_list()
@@ -121,6 +122,14 @@ class AttentionBasedRNN(BaseEstimator):
             x = tf.squeeze(x, [2])
             x = tf.nn.bias_add(x, b)
             return x
+
+        def attn_score(string):
+            if string == 'sigmoid':
+                return tf.nn.sigmoid
+            elif string == 'h_sigmoid':
+                return hard_sigmoid
+            elif string == 'softmax':
+                return tf.nn.softmax
 
         def xavier_init(shape, name):
             return tf.get_variable(name, shape=shape, initializer=xavier_initializer(), dtype=tf.float32)
@@ -172,7 +181,12 @@ class AttentionBasedRNN(BaseEstimator):
         # for prediction
         Ws = xavier_init((self.rnn_dim, label_num), name='Ws')
         bs = tf.Variable(tf.zeros((label_num,)))
-        rnn_unit = tf.nn.rnn_cell.BasicLSTMCell(num_units=self.rnn_dim)
+        if self.rnn_unit == 'BasicLSTM':
+            rnn_unit = tf.nn.rnn_cell.BasicLSTMCell(num_units=self.rnn_dim)
+        elif self.rnn_unit == 'LSTM':
+            rnn_unit = tf.nn.rnn_cell.LSTMCell(num_units=self.rnn_dim, cell_clip=self.cell_clip)
+        elif self.rnn_unit == 'GRU':
+            rnn_unit = tf.nn.rnn_cell.GRU(num_units=self.rnn_dim)
 
         # ----
         # flow
