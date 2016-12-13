@@ -2,9 +2,8 @@ import tensorflow as tf
 from tensorflow.contrib.layers import xavier_initializer
 import constants
 import numpy as np
-from sklearn.base import BaseEstimator
-# because tf doesn't support matmul broadcasting in 0.11
 import keras.backend.tensorflow_backend as K
+from sklearn.base import BaseEstimator
 
 
 class AttentionBasedRNN(BaseEstimator):
@@ -14,9 +13,6 @@ class AttentionBasedRNN(BaseEstimator):
         for k in param_map:
             setattr(self, k, param_map[k])
 
-        self.first_time_to_build_graph = True
-
-        self.vec_dim = None
         self.n_vocab = n_vocab
 
         # hyper parameters. values will be injected on estimator.set_params()
@@ -32,13 +28,8 @@ class AttentionBasedRNN(BaseEstimator):
         self.attr_vec_dim = None
         self.filter_len = None
 
-        # determined when fit()
-        self.label_num = None
-        self.n_ent = None
-        self.n_attr = None
-
         self.use_attention = True
-        self.use_convolution = True
+        self.use_convolution = False
 
     def get_params(self, deep=False):
         return {
@@ -51,22 +42,12 @@ class AttentionBasedRNN(BaseEstimator):
             'ent_vec_dim': self.ent_vec_dim,
             'attr_vec_dim': self.attr_vec_dim,
             'pool_len': self.pool_len,
+            'use_convolution': [True, False],
             'filter_len': self.filter_len}
 
     # call build_graph() beforehand
     def fit(self, sess, ids, entity, attr, sent_lens, y, token_lookup, ent_lookup, attr_lookup):
-        """
-        x is a array contains below in 2nd axis
-          ids: 2D numpy array with shape: (sentence size, num sentence)
-          entity: 1D numpy array with shape: (num sentence,)
-          attr: 1D numpy array with shape: (num sentence,)
-          sent_lens: 1D numpy array with shape: (sentence length,)
-        """
-
-        self.n_ent = len(set(entity))
-        self.n_attr = len(set(attr))
         self.vec_dim = token_lookup.shape[1]
-        self.label_num = y.shape[1]
 
         sess.run(self.embedding_w_init_op, feed_dict={self.embedding_w_ph: token_lookup})
         sess.run(self.embedding_e_init_op, feed_dict={self.embedding_e_ph: ent_lookup})
@@ -90,7 +71,7 @@ class AttentionBasedRNN(BaseEstimator):
         return {self.ids_ph: ids[indices, :],
                 self.entity_ph: np.expand_dims(entity[indices], 1),
                 self.attr_ph: np.expand_dims(attr[indices], 1),
-                self.y_ph: labels[indices, :],
+                self.y_ph: labels[indices],
                 self.sent_len_ph: sent_lens[indices]/self.pool_len,
                 self.b_size_ph: self.batch_size,
                 self.pool_len_ph: self.pool_len,
@@ -150,15 +131,15 @@ class AttentionBasedRNN(BaseEstimator):
         # ------------
         self.b_size_ph = tf.placeholder(shape=(), dtype=tf.int32, name='b_size')
         self.pool_len_ph = tf.placeholder(shape=(), dtype=tf.int32, name='pool_len')
-        self.embedding_w_ph = tf.placeholder(shape=(self.n_vocab, self.vec_dim), dtype=tf.float32, name='w')
-        self.embedding_e_ph = tf.placeholder(shape=(self.n_ent, self.vec_dim), dtype=tf.float32, name='e')
-        self.embedding_a_ph = tf.placeholder(shape=(self.n_attr, self.vec_dim), dtype=tf.float32, name='a')
+        self.embedding_w_ph = tf.placeholder(shape=(self.n_vocab, vec_dim), dtype=tf.float32, name='w')
+        self.embedding_e_ph = tf.placeholder(shape=(n_ent, vec_dim), dtype=tf.float32, name='e')
+        self.embedding_a_ph = tf.placeholder(shape=(n_attr, vec_dim), dtype=tf.float32, name='a')
         self.ids_ph = tf.placeholder(shape=(None, constants.max_sent_len,), dtype=tf.int32, name='ids')
         self.entity_ph = tf.placeholder(shape=(None, 1,), dtype=tf.int32, name='ent')
         self.attr_ph = tf.placeholder(shape=(None, 1,), dtype=tf.int32, name='attr')
-        self.y_ph = tf.placeholder(shape=(None, self.label_num,), dtype=tf.int32, name='y')
+        self.y_ph = tf.placeholder(shape=(None, label_num), dtype=tf.int32, name='y')
         self.sent_len_ph = tf.placeholder(tf.int32, shape=(None,), name='sent_len')
-        self.padding_ph = tf.placeholder(shape=(None, self.filter_len//2, self.vec_dim), dtype=tf.float32, name='pad')
+        self.padding_ph = tf.placeholder(shape=(None, self.filter_len//2, vec_dim), dtype=tf.float32, name='pad')
 
         # -----
         # param
@@ -191,7 +172,7 @@ class AttentionBasedRNN(BaseEstimator):
         # for prediction
         Ws = xavier_init((self.rnn_dim, label_num), name='Ws')
         bs = tf.Variable(tf.zeros((label_num,)))
-        rnn_unit = tf.nn.rnn_cell.LSTMCell(num_units=self.rnn_dim)
+        rnn_unit = tf.nn.rnn_cell.BasicLSTMCell(num_units=self.rnn_dim)
 
         # ----
         # flow
@@ -210,22 +191,21 @@ class AttentionBasedRNN(BaseEstimator):
         hs, _ = tf.nn.dynamic_rnn(rnn_unit, words, sequence_length=self.sent_len_ph, dtype=tf.float32)
 
         if not self.use_attention:
-            predictions = hs[:, -1, :]
-            # (batch, 3)
-            predictions = K.dot(predictions, Ws,) + bs
+            logits = tf.matmul(hs[:, -1, :], Ws,) + bs
         else:
             # (batch, cat_vec_dim)
-            ent = tf.gather(self.embed_ent, self.entity_ph)
-            attr = tf.gather(self.embed_attr, self.attr_ph)
+            # ent = self.embed_ent[self.entity_ph, :]
+            ent = tf.squeeze(tf.gather(self.embed_ent, self.entity_ph), [1])
+            attr = tf.squeeze(tf.gather(self.embed_attr, self.attr_ph), [1])
 
             # (batch, rnn_dim)
-            ent = K.dot(ent, Went) # + self.bv
-            attr = K.dot(attr, Wattr) # + self.bv
+            ent = tf.expand_dims(tf.matmul(ent, Went), axis=1) # + self.bv
+            attr = tf.expand_dims(tf.matmul(attr, Wattr), axis=1) # + self.bv
             ents = tf.tanh(repeat(ent, times=sent_len_after_conv, axis=1))
             attrs = tf.tanh(repeat(attr, times=sent_len_after_conv, axis=1))
 
-            # (batch, sent, 1)
-            concat_ent = tf.concat(2, [ents, hs]) # hs: 36
+            # (batch, sent, vec_dim + ent_dim)
+            concat_ent = tf.concat(2, [ents, hs])
             concat_attr = tf.concat(2, [attrs, hs])
 
             score_func = attn_score(self.attn_score_func)
@@ -233,53 +213,40 @@ class AttentionBasedRNN(BaseEstimator):
             # core flow
             def compute_ctx_vec(batch_idx_and_sent_len):
                 idx, sent_len = batch_idx_and_sent_len[0], batch_idx_and_sent_len[1]
-                trimmed_ent = tf.squeeze(tf.slice(concat_ent, [idx, 0, 0], [1, sent_len, -1]), [0])
-                trimmed_attr = tf.squeeze(tf.slice(concat_attr, [idx, 0, 0], [1, sent_len, -1]), [0])
+                trimmed_ent = concat_ent[idx, :sent_len, :]
+                trimmed_attr = concat_attr[idx, :sent_len, :]
                 attn_ent = score_func(tf.matmul(trimmed_ent, Wa_ent))
                 attn_attr = score_func(tf.matmul(trimmed_attr, Wa_attr))
-                # (sent, 1)
-                attn = attn_ent * attn_attr
-
+                # (1, sent)
+                attn = tf.transpose(attn_ent * attn_attr)
                 # (sent, rnn_dim)
-                hs_trimmed = tf.squeeze(tf.slice(hs, [idx, 0, 0], [1, sent_len, -1]), [0])
-                # (rnn_dim, 1)
-                ctx_vec = tf.transpose(tf.matmul(hs_trimmed, attn, transpose_a=True))
+                sliced_hs = hs[idx, :sent_len, :]
+                # (1, rnn_dim)
+                ctx_vec = tf.matmul(attn, sliced_hs)
 
                 a = tf.matmul(ctx_vec, Wp)
-                # ERROR when slicing
-                # b = tf.matmul(tf.slice(hs_trimmed, [sent_len-1, 0], [1, -1]), Wx)
-                b = tf.matmul(tf.expand_dims(hs_trimmed[sent_len-1, :], 0), Wx)
-                print hs_trimmed.get_shape()
-                print 'a', a.get_shape()
-                print 'b', b.get_shape()
-                print 'ctx_vec', ctx_vec.get_shape()
-                ctx_vec = tf.nn.tanh(tf.squeeze(a, [0]) + tf.squeeze(b, [0]))
-                # ctx_vec = tf.nn.tanh(a + b)
-                # (rnn_dim,)
-
-                # ctx_vec = tf.squeeze(ctx_vec, [0])
-                return ctx_vec
+                b = tf.matmul(tf.slice(sliced_hs, [sent_len-1, 0], [1, -1]), Wx)
+                dst = tf.nn.tanh(a + b)
+                return tf.squeeze(dst, [0])
 
             sequence = tf.stack([tf.range(self.b_size_ph), self.sent_len_ph], axis=1)
             context_vec = tf.map_fn(compute_ctx_vec, sequence, dtype=tf.float32) # (batch, rnn_dim)
-            predictions = tf.squeeze((K.dot(context_vec, Ws,) + bs)) # (batch, 3)
+            logits = tf.squeeze((tf.matmul(context_vec, Ws,) + bs)) # (batch, 3)
 
-        sce = tf.nn.softmax_cross_entropy_with_logits(predictions, self.y_ph)
+        sce = tf.nn.softmax_cross_entropy_with_logits(logits, self.y_ph)
 
         # weight decay
-        regularize = \
+        l2_norms = \
             tf.nn.l2_loss(Went) + \
             tf.nn.l2_loss(Wattr) + \
             tf.nn.l2_loss(Wa_ent) + \
             tf.nn.l2_loss(Wa_attr) + \
+            tf.nn.l2_loss(Wx) + \
+            tf.nn.l2_loss(Wp) + \
             tf.nn.l2_loss(Ws)
-            # tf.nn.l2_loss(self.embed_tok) + \
-            # tf.nn.l2_loss(self.embed_ent) + \
-            # tf.nn.l2_loss(self.embed_attr) + \
 
-        self.loss = tf.reduce_mean(sce) + self.w_decay_factor * regularize
-
+        self.loss = tf.reduce_mean(sce) + self.w_decay_factor * l2_norms
         self.train_op = tf.train.AdamOptimizer(self.lr).minimize(self.loss)
         # metrics
-        booleans = tf.equal(tf.argmax(predictions, 1), tf.argmax(self.y_ph, 1))
+        booleans = tf.equal(tf.argmax(logits, 1), tf.argmax(self.y_ph, 1))
         self.accuracy_op = tf.reduce_mean(tf.cast(booleans, "float"))

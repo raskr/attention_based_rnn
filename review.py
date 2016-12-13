@@ -70,19 +70,19 @@ def load_semeval_reviews(filename, is_test_file):
             pols.add(opinion.polarity)
 
     return reviews, \
-           dict((v, k) for k, v in enumerate(ents)), \
-           dict((v, k) for k, v in enumerate(attrs)), \
-           dict((v, k) for k, v in enumerate(pols)),\
+           {v: k for k, v in enumerate(ents)}, \
+           {v: k for k, v in enumerate(attrs)}, \
+           {v: k for k, v in enumerate(pols)},\
 
 
 
-def ent_attr_to_words(reviews, vocab):
+def ent_attr_to_words(reviews, word2idx):
     from nltk.corpus import stopwords
     from collections import defaultdict
     # from nltk.tag import pos_tag
     stopwords = set(stopwords.words('english'))
     stopwords.add('I')
-    sw_ids = set([vocab[sw].index for sw in stopwords])
+    # sw_ids = set([vocab[sw].index for sw in stopwords])
 
     # e.g. {'FOOD': set(4, 6, 8)}
     ent_map = defaultdict(set)
@@ -91,7 +91,7 @@ def ent_attr_to_words(reviews, vocab):
 
     for review in reviews:
         # strings -> ids for performance
-        review.ids = [vocab[tok].index for tok in review.tokens if vocab[tok].index not in sw_ids]
+        review.ids = [word2idx[tok] for tok in review.tokens if tok not in stopwords]
 
         # extract entities and attributes
         ents, attrs = set(), set()
@@ -118,11 +118,11 @@ def ent_attr_to_words(reviews, vocab):
     return ent_map, attr_map
 
 
-def make_ent_attr_lookup(reviews, vocab, id2vec, ent2idx, attr2idx):
+def make_ent_attr_lookup(reviews, word2idx, id2vec, ent2idx, attr2idx):
     import numpy as np
     from operator import itemgetter
     # e.g. {'FOOD': set(4, 6, 8)}
-    ent2words, attr2words = ent_attr_to_words(reviews, vocab)
+    ent2words, attr2words = ent_attr_to_words(reviews, word2idx)
 
     # [(X1, vec), (X2, vec), ...]
     pairs1 = sorted([(ent2idx[k], reduce(np.add, map(id2vec, v)))

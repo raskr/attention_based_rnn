@@ -94,3 +94,5 @@ ENV/
 .idea/
 *TODO*
 *.gensim
+*.gz
+snippets.py

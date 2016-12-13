@@ -1,17 +1,17 @@
 import math
-import glob
-import random
 import os
 import re
 import numpy as np
-from logging import getLogger, StreamHandler, DEBUG
+from logging import getLogger, StreamHandler, INFO, WARNING
 
-base_path = os.path.dirname(os.path.abspath(__file__))
+import constants
+
 logger = getLogger(__name__)
-handler = StreamHandler()
-handler.setLevel(DEBUG)
-logger.setLevel(DEBUG)
-logger.addHandler(handler)
+logger.addHandler(StreamHandler())
+
+
+def log(msg, warn=False, ):
+    logger.log(WARNING if warn else INFO, msg)
 
 
 def train_val_split(seq, test_idx, fold=None,):
@@ -124,20 +124,25 @@ def to_lower(sent):
     return [w.lower() if w != 'I' else w for w in sent]
 
 
-def list_fnames(dirname, ext=None, name_only=False, full_path=False):
+def load_embedding_weights():
+    vector_file = constants.base_path + '/saved_models/vectors{}.txt'.format(constants.year)
+    assert os.path.exists(vector_file)
 
-    if ext:
-        filenames = glob.glob('{}/*.{}'.format(dirname, ext))
-    else:
-        filenames = glob.glob('{}/*'.format(dirname))
+    words = []
+    with open(vector_file, 'r') as infile:
+        header = str(infile.readline())
+        vocab_size, vec_dim = map(int, header.strip().split())
+        # first vector denotes padding
+        vectors = [np.zeros((vec_dim,))]
 
-    assert len(filenames) > 0, 'file not found'
+        for line in infile.readlines():
+            parts = str(line).rstrip().split(" ")
+            assert len(parts) == 1 + vec_dim
+            word, vec = parts[0], np.array((map(np.float32, parts[1:])))
+            vectors.append(vec)
+            words.append(word)
 
-    if name_only:
-        return [fname.split('/')[-1] for fname in filenames]
-    elif full_path:
-        return [base_path + fname[1:] for fname in filenames]
-    else:
-        return filenames
+    # index 0 is vectors for padding
+    word2idx = {word: i for i, word in zip(range(1, len(words) + 1), words)}
 
-
+    return word2idx, np.array(vectors)
