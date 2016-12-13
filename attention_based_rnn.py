@@ -186,7 +186,7 @@ class AttentionBasedRNN(BaseEstimator):
         elif self.rnn_unit == 'LSTM':
             rnn_unit = tf.nn.rnn_cell.LSTMCell(num_units=self.rnn_dim, cell_clip=self.cell_clip)
         elif self.rnn_unit == 'GRU':
-            rnn_unit = tf.nn.rnn_cell.GRU(num_units=self.rnn_dim)
+            rnn_unit = tf.nn.rnn_cell.GRUCell(num_units=self.rnn_dim)
 
         # ----
         # flow

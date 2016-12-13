@@ -17,6 +17,7 @@ else:
     train_filename = base_path + '/train_xml/16_res_train.xml'
     test_filename = base_path + '/test_xml/16_res_test.xml'
 
+# from NLTK english stopwords
 stopwords = {u'all', u'just', u'being', u'over', u'both', u'through', u'yourselves',
              u'its', u'before', u'herself', u'had', u'should', u'to', u'only', u'under',
              u'ours', u'has', u'do', u'them', u'his', u'very', u'they', u'not', u'during',
