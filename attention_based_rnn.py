@@ -183,10 +183,10 @@ class AttentionBasedRNN(BaseEstimator):
         bs = tf.Variable(tf.zeros((label_num,)))
         if self.rnn_unit == 'BasicLSTM':
             rnn_unit = tf.nn.rnn_cell.BasicLSTMCell(num_units=self.rnn_dim)
-        elif self.rnn_unit == 'LSTM':
-            rnn_unit = tf.nn.rnn_cell.LSTMCell(num_units=self.rnn_dim, cell_clip=self.cell_clip)
         elif self.rnn_unit == 'GRU':
             rnn_unit = tf.nn.rnn_cell.GRUCell(num_units=self.rnn_dim)
+        else:
+            rnn_unit = tf.nn.rnn_cell.LSTMCell(num_units=self.rnn_dim, cell_clip=self.cell_clip)
 
         # ----
         # flow

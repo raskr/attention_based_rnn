@@ -136,6 +136,29 @@ def load_semeval_sents(filename):
     return sents
 
 
+def google_news_words():
+    vector_file = constants.base_path + '/saved_models/vectors{}.txt'.format(constants.year)
+    assert os.path.exists(vector_file)
+
+    with open(vector_file, 'r') as infile:
+        words = []
+        for line in infile.readlines()[1:]:
+            parts = str(line).rstrip().split(" ")
+            word = parts[0]
+            words.append(word)
+    return words
+
+
+def load_semeval_words():
+    semeval_sents = load_semeval_sents(constants.train_filename) + \
+                    load_semeval_sents(constants.test_filename)
+
+    semeval_words = []
+    for sent in semeval_sents:
+        semeval_words.extend(sent)
+    return semeval_words
+
+
 def load_embedding_weights():
     vector_file = constants.base_path + '/saved_models/vectors{}.txt'.format(constants.year)
     assert os.path.exists(vector_file)
@@ -155,15 +178,10 @@ def load_embedding_weights():
     # --- words and vectors from google news were created,
     # --- but this will make cache miss on semeval dataset.
 
-    semeval_sents = load_semeval_sents(constants.train_filename) +\
-                    load_semeval_sents(constants.test_filename)
-
-    semeval_words = []
-    for sent in semeval_sents:
-        semeval_words.extend(sent)
-
+    semeval_words = load_semeval_words()
     not_covered = set(semeval_words) - set(words)
-    print '{}% of words was covered'.format(100.*(1. - float(len(not_covered))/len(set(semeval_words))))
+    print '{}% of semeval words were covered by google vectors'\
+        .format(100.*(1. - float(len(not_covered))/len(set(semeval_words))))
     words.extend(list(not_covered))
     vectors.extend([np.random.uniform(-1., 1., vec_dim) for _ in range(len(not_covered))])
 
