@@ -21,21 +21,8 @@ class Review:
         self.tokens = utils.filter_symbol(utils.to_lower(tokenize(string)))
         self.ids = None
 
-    # def get_entity_vector(self, entity):
-    #     """
-    #     we don't know which words are related to the entity.
-    #     Given: (entity name, review text)
-    #
-    #     :param entity: string
-    #     :return:
-    #     """
-    #     ent_exists = len(filter(lambda op: op.ent == entity, self.opinions)) > 0
 
-
-    # def get_attr_vector(self, attr):
-
-
-def load_semeval_reviews(filename, is_test_file):
+def load_semeval_reviews(filename):
 
     reviews = []
 
@@ -76,11 +63,18 @@ def load_semeval_reviews(filename, is_test_file):
 
 
 
-def ent_attr_to_words(reviews, word2idx, not_covered):
+def ent_attr_to_words(reviews, word2idx):
+    """
+    :param reviews:
+    :param word2idx: func
+    :param not_covered:
+    :return:
+    """
     from nltk.corpus import stopwords
     from collections import defaultdict
     import constants
 
+    not_covered = set(utils.load_semeval_words()) - set(utils.google_news_words())
     stopwords = constants.stopwords
 
     # e.g. {'FOOD': set(4, 6, 8)}
@@ -89,7 +83,7 @@ def ent_attr_to_words(reviews, word2idx, not_covered):
     attr_map = defaultdict(set)
 
     for review in reviews:
-        # strings -> ids for performance
+        # words -> ids for performance
         review.ids = [word2idx[tok] for tok in review.tokens if tok not in stopwords]
 
         # extract entities and attributes
@@ -121,11 +115,11 @@ def ent_attr_to_words(reviews, word2idx, not_covered):
     return ent_map, attr_map
 
 
-def make_ent_attr_lookup(reviews, word2idx, id2vec, ent2idx, attr2idx, not_covered):
+def make_ent_attr_embedding(reviews, word2idx, id2vec, ent2idx, attr2idx):
     import numpy as np
     from operator import itemgetter
     # e.g. {'FOOD': set(4, 6, 8)}
-    ent2words, attr2words = ent_attr_to_words(reviews, word2idx, not_covered)
+    ent2words, attr2words = ent_attr_to_words(reviews, word2idx)
 
     # sort by ent/attr ID
     # [(X1, vec), (X2, vec), ...]
