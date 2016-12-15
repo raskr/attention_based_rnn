@@ -179,6 +179,6 @@ if __name__ == '__main__':
         params = pickle.load(f)
         print params
 
-    with tf.Session() as sess:
-        model = train(params, sess)
-        test(model, sess)
+    # with tf.Session() as sess:
+    #     model = train(params, sess)
+    #     test(model, sess)
