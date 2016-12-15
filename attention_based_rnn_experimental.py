@@ -95,7 +95,6 @@ class AttentionBasedRNN(BaseEstimator):
         return self.accuracy_op.eval(feed_dict, sess)
 
     def build_graph(self, n_ent, n_attr, vec_dim, label_num):
-
         def hard_sigmoid(x):
             x = (0.2 * x) + 0.5
             zero = tf.convert_to_tensor(0., tf.float32)
@@ -170,15 +169,14 @@ class AttentionBasedRNN(BaseEstimator):
         Wattr = xavier_init((vec_dim, self.attr_vec_dim), name='Wattr')
         # bv = tf.Variable(tf.zeros((self.rnn_dim,)))
         # for attention
-        Wa_ent = xavier_init((self.rnn_dim + self.ent_vec_dim, 1), name='Wa_ent')
-        Wa_attr = xavier_init((self.rnn_dim + self.attr_vec_dim, 1), name='Wa_attr')
+        Wa_ent = xavier_init((self.n_filter + self.ent_vec_dim, 1), name='Wa_ent')
+        Wa_attr = xavier_init((self.n_filter + self.attr_vec_dim, 1), name='Wa_attr')
         # for conv
         Wc = xavier_init((self.filter_len, vec_dim, 1, self.n_filter), name='Wc')
         bc = tf.Variable(tf.zeros((self.n_filter,)))
         # before prediction
         Wx = xavier_init((self.rnn_dim, self.rnn_dim), name='Wx')
         Wp = xavier_init((self.rnn_dim, self.rnn_dim), name='Wp')
-        Wmerge = xavier_init((self.rnn_dim * 2, self.rnn_dim), name='Wmerge')
         # for prediction
         Ws = xavier_init((self.rnn_dim, label_num), name='Ws')
         bs = tf.Variable(tf.zeros((label_num,)))
@@ -192,70 +190,65 @@ class AttentionBasedRNN(BaseEstimator):
         # ----
         # flow
         # ----
+        # 1. convolve all words
+        # 2. calc connection strength of `a convolved word` and E#A
+        #    :(each word || E) . We => attention A
+        #    :(each word || A) . Wa => attention E
+
         self.embedding_w_init_op = tf.assign(self.embed_tok, self.embedding_w_ph)
         self.embedding_e_init_op = tf.assign(self.embed_ent, self.embedding_e_ph)
         self.embedding_a_init_op = tf.assign(self.embed_attr, self.embedding_a_ph)
 
-        # (batch, 70, vec_dim)
-        words = tf.gather(self.embed_tok, self.ids_ph)
+        # make embedding (batch, 70, vec_dim)
+        words_ = tf.gather(self.embed_tok, self.ids_ph)
+        words = conv1d(words_, Wc, bc, pool_len=self.pool_len, padding=self.padding_ph)
 
-        if self.use_convolution:
-            words = conv1d(words, Wc, bc, pool_len=self.pool_len, padding=self.padding_ph)
+        ent = tf.squeeze(tf.gather(self.embed_ent, self.entity_ph), [1])
+        ent = tf.expand_dims(tf.matmul(ent, Went), axis=1)
+        ents = tf.tanh(repeat(ent, times=sent_len_after_conv, axis=1))
+
+        attr = tf.squeeze(tf.gather(self.embed_attr, self.attr_ph), [1])
+        attr = tf.expand_dims(tf.matmul(attr, Wattr), axis=1)
+        attrs = tf.tanh(repeat(attr, times=sent_len_after_conv, axis=1))
+
+        # (batch, sent, n_filter + ent_dim)
+        concats_ent = tf.concat(2, [words, ents])
+        # print concats_ent.get_shape()
+        # assert False
+        concats_attr = tf.concat(2, [words, attrs])
 
         # (batch, sent, 128)
-        hs, _ = tf.nn.dynamic_rnn(rnn_unit, words, sequence_length=self.sent_len_ph, dtype=tf.float32)
+        hs, _ = tf.nn.dynamic_rnn(rnn_unit, words_, sequence_length=self.sent_len_ph, dtype=tf.float32)
 
-        if not self.use_attention:
-            logits = tf.matmul(hs[:, -1, :], Ws,) + bs
-        else:
-            # (batch, cat_vec_dim)
-            # ent = self.embed_ent[self.entity_ph, :]
-            ent = tf.squeeze(tf.gather(self.embed_ent, self.entity_ph), [1])
-            attr = tf.squeeze(tf.gather(self.embed_attr, self.attr_ph), [1])
+        score_func = attn_score(self.attn_score_func)
 
-            # (batch, rnn_dim)
-            ent = tf.expand_dims(tf.matmul(ent, Went), axis=1) # + self.bv
-            attr = tf.expand_dims(tf.matmul(attr, Wattr), axis=1) # + self.bv
-            ents = tf.tanh(repeat(ent, times=sent_len_after_conv, axis=1))
-            attrs = tf.tanh(repeat(attr, times=sent_len_after_conv, axis=1))
+        # core flow
+        def compute_ctx_vec(batch_idx_and_sent_len):
+            idx, sent_len = batch_idx_and_sent_len[0], batch_idx_and_sent_len[1]
+            # (sent, 128)
+            trimmed_ent = concats_ent[idx, :sent_len, :]
+            trimmed_attr = concats_attr[idx, :sent_len, :]
 
-            # (batch, sent, vec_dim + ent_dim)
-            concat_ent = tf.concat(2, [ents, hs])
-            concat_attr = tf.concat(2, [attrs, hs])
+            # attention weights (shape depends on sentence length)
+            attn_ent = score_func(tf.matmul(trimmed_ent, Wa_ent))
+            attn_attr = score_func(tf.matmul(trimmed_attr, Wa_attr))
 
-            score_func = attn_score(self.attn_score_func)
+            # (1, sent) * (sent, n_filter)
+            attn = tf.transpose(attn_ent * attn_attr)
+            # print words[idx, :sent_len, :].get_shape()
+            # context vector (1, n_filter)
+            ctx_vec = tf.matmul(attn, hs[idx, :sent_len, :])
 
-            # core flow
-            def compute_ctx_vec(batch_idx_and_sent_len):
-                idx, sent_len = batch_idx_and_sent_len[0], batch_idx_and_sent_len[1]
-                trimmed_ent = concat_ent[idx, :sent_len, :]
-                trimmed_attr = concat_attr[idx, :sent_len, :]
+            projected_ctx = tf.matmul(ctx_vec, Wp)
+            from_last = tf.matmul(tf.slice(hs[idx, :sent_len, :], [sent_len-1, 0], [1, -1]), Wx)
 
-                # attention weights (shape depends on sentence length)
-                attn_ent = score_func(tf.matmul(trimmed_ent, Wa_ent))
-                attn_attr = score_func(tf.matmul(trimmed_attr, Wa_attr))
+            dst = tf.nn.tanh(projected_ctx + from_last)
 
-                attn = tf.transpose(attn_ent * attn_attr)
-                # (sent, rnn_dim)
-                sliced_hs = hs[idx, :sent_len, :]
+            return tf.tanh(tf.squeeze(dst, [0]))
 
-                # context vector (1, rnn_dim)
-                ctx_vec = tf.matmul(attn, sliced_hs)
-                # ctx_vec_ent = tf.matmul(attn_ent, sliced_hs)
-                # ctx_vec_attr = tf.matmul(attn_attr, sliced_hs)
-                # ctx_vec = ctx_vec_ent + ctx_vec_attr
-                # ctx_vec = tf.matmul(tf.concat(1, [ctx_vec_ent, ctx_vec_attr]), Wmerge)
-
-                projected_ctx = tf.matmul(ctx_vec, Wp)
-                from_last = tf.matmul(tf.slice(sliced_hs, [sent_len-1, 0], [1, -1]), Wx)
-
-                dst = tf.nn.tanh(projected_ctx + from_last)
-
-                return tf.tanh(tf.squeeze(dst, [0]))
-
-            sequence = tf.stack([tf.range(self.b_size_ph), self.sent_len_ph], axis=1)
-            context_vec = tf.map_fn(compute_ctx_vec, sequence, dtype=tf.float32) # (batch, rnn_dim)
-            logits = tf.squeeze((tf.matmul(context_vec, Ws,) + bs)) # (batch, 3)
+        sequence = tf.stack([tf.range(self.b_size_ph), self.sent_len_ph], axis=1)
+        context_vec = tf.map_fn(compute_ctx_vec, sequence, dtype=tf.float32) # (batch, rnn_dim)
+        logits = tf.squeeze((tf.matmul(context_vec, Ws,) + bs)) # (batch, 3)
 
         sce = tf.nn.softmax_cross_entropy_with_logits(logits, self.y_ph)
 

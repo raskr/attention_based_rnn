@@ -8,7 +8,7 @@ from review import load_semeval_reviews
 from review import make_ent_attr_embedding
 import utils
 import constants
-import attention_based_rnn
+import attention_based_rnn_experimental
 
 word2idx, embedding_w, not_covered = utils.load_embedding_weights()
 max_vocab = len(embedding_w)
@@ -19,7 +19,7 @@ def train(hyper_params, sess):
     ent_embedding, attr_embedding = make_ent_attr_embedding(reviews, word2idx,
                                                             lambda x: embedding_w[x], ent2idx, attr2idx)
 
-    model = attention_based_rnn.AttentionBasedRNN(n_vocab=max_vocab)
+    model = attention_based_rnn_experimental.AttentionBasedRNN(n_vocab=max_vocab)
     model.set_params(**hyper_params)
 
     # list of (ids, ent, attr, pol)
@@ -72,7 +72,7 @@ def random_search_cv(n_iter):
     ent_embedding, attr_embedding = make_ent_attr_embedding(reviews, word2idx,
                                                             lambda x: embedding_w[x], ent2idx, attr2idx)
 
-    model = attention_based_rnn.AttentionBasedRNN(n_vocab=max_vocab)
+    model = attention_based_rnn_experimental.AttentionBasedRNN(n_vocab=max_vocab)
 
     # list of (ids, ent, attr, pol)
     tuples = []
@@ -93,7 +93,7 @@ def random_search_cv(n_iter):
 
     def cv(hyper_params):
         print 'next:', hyper_params
-        fold = 5
+        fold = 2
 
         perm = np.random.permutation(len(ids_list))
         chunk_size = len(perm)/fold
@@ -146,30 +146,34 @@ def random_search_cv(n_iter):
         'batch_size': [16, 32, 64],
         'n_filter': [64, 128, 200, 256, 512],
         'ent_vec_dim': [32, 64, 128, 200, 256, 512],
-        'use_convolution': [True, False],
+        'use_convolution': [True],
         'attr_vec_dim': [32, 64, 128, 200, 256, 512],
         'pool_len': [1],
         'filter_len': [3, 5]}, n_iter=n_iter))
 
     scores = []
+
     for i, params in enumerate(sampler):
         print '{}/{} param'.format(i, len(sampler))
         scores.append(cv(params))
+
     scores = np.array(scores)
 
-    # print all result
-    for i, param in enumerate(sampler):
-        best_idx = scores[i].argmax()
-        utils.log('{}: {}'.format(scores[i],  param), i == best_idx)
+    # log result
+    with open('cv_result.txt', mode='w') as f:
+        for param, score in zip(sampler, scores):
+            f.write('{}: {}\n'.format(score,  param))
 
+    # save best param
     with open('cv_result.pkl', mode='wb') as f:
-        pickle.dump(sampler[scores.argmax()], f)
+        best_idx = scores.argmax()
+        pickle.dump(sampler[best_idx], f)
 
     # print best result
     utils.log('best params: {}, {}'.format(scores.argmax(), str(sampler[scores.argmax()])), True)
 
 if __name__ == '__main__':
-    #random_search_cv(n_iter=2)
+    random_search_cv(n_iter=256)
 
     with open('cv_result.pkl', mode='rb') as f:
         params = pickle.load(f)
