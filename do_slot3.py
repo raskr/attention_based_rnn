@@ -175,9 +175,9 @@ def random_search_cv(n_iter):
 if __name__ == '__main__':
     random_search_cv(n_iter=256)
 
-    with open('cv_result.pkl', mode='rb') as f:
-        params = pickle.load(f)
-        print params
+    # with open('cv_result.pkl', mode='rb') as f:
+    #     params = pickle.load(f)
+    #     print params
 
     # with tf.Session() as sess:
     #     model = train(params, sess)
