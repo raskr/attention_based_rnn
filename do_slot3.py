@@ -24,13 +24,12 @@ def train(hyper_params, sess):
     model.set_params(**hyper_params)
 
     # list of (ids, ent, attr, pol)
-    omitted = 0
     tuples = []
     for review in reviews:
         if len(review.tokens) <= 1:
-            omitted += 1
-            # continue
-        ids = [word2idx[tok] for tok in review.tokens]
+            ids = [0] + [word2idx[tok] for tok in review.tokens]
+        else:
+            ids = [word2idx[tok] for tok in review.tokens]
         tuples_ = [(ids, ent2idx[op.ent], attr2idx[op.attr], polarity2idx[op.polarity]) for op in review.opinions]
         tuples.extend(tuples_)
 
@@ -57,12 +56,11 @@ def test(model, sess):
 
     # list of (ids, ent, attr, pol)
     tuples = []
-    omitted = 0
     for review in reviews:
         if len(review.tokens) <= 1:
-            omitted += 1
-            continue
-        ids = [word2idx[tok] for tok in review.tokens]
+            ids = [0] + [word2idx[tok] for tok in review.tokens]
+        else:
+            ids = [word2idx[tok] for tok in review.tokens]
         tuples_ = [(ids, ent2idx[op.ent], attr2idx[op.attr], polarity2idx[op.polarity]) for op in review.opinions]
         tuples.extend(tuples_)
 
@@ -87,10 +85,10 @@ def random_search_cv(n_iter):
     tuples = []
     # omitted = 0
     for review in reviews:
-        # if len(review.tokens) <= 1:
-        #     omitted += 1
-        #     continue
-        ids_list = [word2idx[tok] for tok in review.tokens]
+        if len(review.tokens) <= 1:
+            ids_list = [0] + [word2idx[tok] for tok in review.tokens]
+        else:
+            ids_list = [word2idx[tok] for tok in review.tokens]
         tuples_ = [(ids_list, ent2idx[op.ent], attr2idx[op.attr], polarity2idx[op.polarity]) for op in review.opinions]
         tuples.extend(tuples_)
 

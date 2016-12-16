@@ -235,7 +235,7 @@ class AttentionBasedRNN(BaseEstimator):
             # attention weights (shape depends on sentence length), (sent, 1)
             alignment_ent = score_func(tf.matmul(trimmed_ent, Wa_ent))
             alignment_attr = score_func(tf.matmul(trimmed_attr, Wa_attr))
-            alignment = tf.transpose(score_func(alignment_ent + alignment_attr))
+            alignment = tf.transpose(score_func(alignment_ent * alignment_attr))
 
             # (1, rnn_dim)
             ctx_vec = tf.matmul(alignment, hs[idx, :sent_len, :])
