@@ -210,11 +210,11 @@ class AttentionBasedRNN(BaseEstimator):
 
         ent = tf.squeeze(tf.gather(self.embed_ent, self.entity_ph), [1])
         ent = tf.expand_dims(tf.matmul(ent, Went), axis=1)
-        ents = tf.tanh(repeat(ent, times=sent_len_after_conv, axis=1))
+        ents = tf.nn.tanh(repeat(ent, times=sent_len_after_conv, axis=1))
 
         attr = tf.squeeze(tf.gather(self.embed_attr, self.attr_ph), [1])
         attr = tf.expand_dims(tf.matmul(attr, Wattr), axis=1)
-        attrs = tf.tanh(repeat(attr, times=sent_len_after_conv, axis=1))
+        attrs = tf.nn.tanh(repeat(attr, times=sent_len_after_conv, axis=1))
 
         # (batch, sent, n_filter + ent_dim)
         concats_ent = tf.nn.tanh(tf.concat(2, [words, ents]))
