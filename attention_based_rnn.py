@@ -125,9 +125,15 @@ class AttentionBasedRNN(BaseEstimator):
 
         def attn_score(string):
             if string == 'sigmoid':
-                return tf.nn.sigmoid
+                def a(x):
+                    y = tf.nn.sigmoid(x)
+                    return y/tf.reduce_sum(y, axis=0)
+                return a
             elif string == 'h_sigmoid':
-                return hard_sigmoid
+                def a(x):
+                    y = hard_sigmoid(x)
+                    return y/tf.reduce_sum(y, axis=0)
+                return a
             elif string == 'softmax':
                 return tf.nn.softmax
 
@@ -235,7 +241,7 @@ class AttentionBasedRNN(BaseEstimator):
                 attn_ent = score_func(tf.matmul(trimmed_ent, Wa_ent))
                 attn_attr = score_func(tf.matmul(trimmed_attr, Wa_attr))
 
-                attn = tf.transpose(attn_ent * attn_attr)
+                attn = tf.transpose(attn_ent + attn_attr)
                 # (sent, rnn_dim)
                 sliced_hs = hs[idx, :sent_len, :]
 
@@ -255,7 +261,7 @@ class AttentionBasedRNN(BaseEstimator):
 
             sequence = tf.stack([tf.range(self.b_size_ph), self.sent_len_ph], axis=1)
             context_vec = tf.map_fn(compute_ctx_vec, sequence, dtype=tf.float32) # (batch, rnn_dim)
-            logits = tf.squeeze((tf.matmul(context_vec, Ws,) + bs)) # (batch, 3)
+            logits = tf.squeeze((tf.matmul(context_vec, Ws,))) # (batch, 3)
 
         sce = tf.nn.softmax_cross_entropy_with_logits(logits, self.y_ph)
 

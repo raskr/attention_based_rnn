@@ -8,7 +8,8 @@ from review import load_semeval_reviews
 from review import make_ent_attr_embedding
 import utils
 import constants
-import attention_based_rnn_experimental
+from attention_based_rnn_experimental import AttentionBasedRNN
+# from attention_based_rnn import AttentionBasedRNN
 
 word2idx, embedding_w, not_covered = utils.load_embedding_weights()
 max_vocab = len(embedding_w)
@@ -19,12 +20,16 @@ def train(hyper_params, sess):
     ent_embedding, attr_embedding = make_ent_attr_embedding(reviews, word2idx,
                                                             lambda x: embedding_w[x], ent2idx, attr2idx)
 
-    model = attention_based_rnn_experimental.AttentionBasedRNN(n_vocab=max_vocab)
+    model = AttentionBasedRNN(n_vocab=max_vocab)
     model.set_params(**hyper_params)
 
     # list of (ids, ent, attr, pol)
+    omitted = 0
     tuples = []
     for review in reviews:
+        if len(review.tokens) <= 1:
+            omitted += 1
+            # continue
         ids = [word2idx[tok] for tok in review.tokens]
         tuples_ = [(ids, ent2idx[op.ent], attr2idx[op.attr], polarity2idx[op.polarity]) for op in review.opinions]
         tuples.extend(tuples_)
@@ -52,7 +57,11 @@ def test(model, sess):
 
     # list of (ids, ent, attr, pol)
     tuples = []
+    omitted = 0
     for review in reviews:
+        if len(review.tokens) <= 1:
+            omitted += 1
+            continue
         ids = [word2idx[tok] for tok in review.tokens]
         tuples_ = [(ids, ent2idx[op.ent], attr2idx[op.attr], polarity2idx[op.polarity]) for op in review.opinions]
         tuples.extend(tuples_)
@@ -72,7 +81,7 @@ def random_search_cv(n_iter):
     ent_embedding, attr_embedding = make_ent_attr_embedding(reviews, word2idx,
                                                             lambda x: embedding_w[x], ent2idx, attr2idx)
 
-    model = attention_based_rnn_experimental.AttentionBasedRNN(n_vocab=max_vocab)
+    model = AttentionBasedRNN(n_vocab=max_vocab)
 
     # list of (ids, ent, attr, pol)
     tuples = []
@@ -160,6 +169,7 @@ def random_search_cv(n_iter):
     scores = np.array(scores)
 
     # log result
+    utils.log('best params: {}, {}'.format(scores.argmax(), str(sampler[scores.argmax()])), True)
     with open('cv_result.txt', mode='w') as f:
         for param, score in zip(sampler, scores):
             f.write('{}: {}\n'.format(score,  param))
@@ -169,16 +179,14 @@ def random_search_cv(n_iter):
         best_idx = scores.argmax()
         pickle.dump(sampler[best_idx], f)
 
-    # print best result
-    utils.log('best params: {}, {}'.format(scores.argmax(), str(sampler[scores.argmax()])), True)
 
 if __name__ == '__main__':
     random_search_cv(n_iter=256)
 
-    # with open('cv_result.pkl', mode='rb') as f:
-    #     params = pickle.load(f)
-    #     print params
+    with open('cv_result.pkl', mode='rb') as f:
+        params = pickle.load(f)
+        print params
 
-    # with tf.Session() as sess:
-    #     model = train(params, sess)
-    #     test(model, sess)
+    with tf.Session() as sess:
+        model = train(params, sess)
+        test(model, sess)

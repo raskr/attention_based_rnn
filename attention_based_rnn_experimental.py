@@ -20,7 +20,7 @@ class AttentionBasedRNN(BaseEstimator):
         self.rnn_dim = None
         self.batch_size = None
         self.pool_len = None
-        self.epoch = 3 # constant while cv
+        self.epoch = 4 # constant while cv
         self.lr = None
         self.n_filter = None
         self.ent_vec_dim = None
@@ -115,18 +115,24 @@ class AttentionBasedRNN(BaseEstimator):
                 x = tf.concat(1, (padding, x, padding))
             x = tf.expand_dims(x, 3)
             x = tf.nn.conv2d(x, W, strides=[1, 1, 1, 1], padding='VALID')
-            # max_pool is effective!!
             if pool_len != 1:
                 x = tf.nn.max_pool(x, ksize=[1, pool_len, 1, 1], strides=[1, pool_len, 1, 1], padding='VALID')
             x = tf.squeeze(x, [2])
             x = tf.nn.bias_add(x, b)
+            x = tf.nn.relu(x)
             return x
 
         def attn_score(string):
             if string == 'sigmoid':
-                return tf.nn.sigmoid
+                def a(x):
+                    y = tf.nn.sigmoid(x)
+                    return y/tf.reduce_sum(y, axis=0)
+                return a
             elif string == 'h_sigmoid':
-                return hard_sigmoid
+                def a(x):
+                    y = hard_sigmoid(x)
+                    return y/tf.reduce_sum(y, axis=0)
+                return a
             elif string == 'softmax':
                 return tf.nn.softmax
 
@@ -137,17 +143,17 @@ class AttentionBasedRNN(BaseEstimator):
         # ------------
         # placeholders
         # ------------
-        self.b_size_ph = tf.placeholder(shape=(), dtype=tf.int32, name='b_size')
-        self.pool_len_ph = tf.placeholder(shape=(), dtype=tf.int32, name='pool_len')
-        self.embedding_w_ph = tf.placeholder(shape=(self.n_vocab, vec_dim), dtype=tf.float32, name='w')
-        self.embedding_e_ph = tf.placeholder(shape=(n_ent, vec_dim), dtype=tf.float32, name='e')
-        self.embedding_a_ph = tf.placeholder(shape=(n_attr, vec_dim), dtype=tf.float32, name='a')
-        self.ids_ph = tf.placeholder(shape=(None, constants.max_sent_len,), dtype=tf.int32, name='ids')
-        self.entity_ph = tf.placeholder(shape=(None, 1,), dtype=tf.int32, name='ent')
-        self.attr_ph = tf.placeholder(shape=(None, 1,), dtype=tf.int32, name='attr')
-        self.y_ph = tf.placeholder(shape=(None, label_num), dtype=tf.int32, name='y')
-        self.sent_len_ph = tf.placeholder(tf.int32, shape=(None,), name='sent_len')
-        self.padding_ph = tf.placeholder(shape=(None, self.filter_len//2, vec_dim), dtype=tf.float32, name='pad')
+        self.b_size_ph = tf.placeholder(shape=(), dtype=tf.int32)
+        self.pool_len_ph = tf.placeholder(shape=(), dtype=tf.int32)
+        self.embedding_w_ph = tf.placeholder(shape=(self.n_vocab, vec_dim), dtype=tf.float32)
+        self.embedding_e_ph = tf.placeholder(shape=(n_ent, vec_dim), dtype=tf.float32)
+        self.embedding_a_ph = tf.placeholder(shape=(n_attr, vec_dim), dtype=tf.float32)
+        self.ids_ph = tf.placeholder(shape=(None, constants.max_sent_len,), dtype=tf.int32)
+        self.entity_ph = tf.placeholder(shape=(None, 1,), dtype=tf.int32)
+        self.attr_ph = tf.placeholder(shape=(None, 1,), dtype=tf.int32)
+        self.y_ph = tf.placeholder(shape=(None, label_num), dtype=tf.int32)
+        self.sent_len_ph = tf.placeholder(tf.int32, shape=(None,))
+        self.padding_ph = tf.placeholder(shape=(None, self.filter_len//2, vec_dim), dtype=tf.float32)
 
         # -----
         # param
@@ -179,7 +185,6 @@ class AttentionBasedRNN(BaseEstimator):
         Wp = xavier_init((self.rnn_dim, self.rnn_dim), name='Wp')
         # for prediction
         Ws = xavier_init((self.rnn_dim, label_num), name='Ws')
-        bs = tf.Variable(tf.zeros((label_num,)))
         if self.rnn_unit == 'BasicLSTM':
             rnn_unit = tf.nn.rnn_cell.BasicLSTMCell(num_units=self.rnn_dim)
         elif self.rnn_unit == 'GRU':
@@ -212,43 +217,37 @@ class AttentionBasedRNN(BaseEstimator):
         attrs = tf.tanh(repeat(attr, times=sent_len_after_conv, axis=1))
 
         # (batch, sent, n_filter + ent_dim)
-        concats_ent = tf.concat(2, [words, ents])
-        # print concats_ent.get_shape()
-        # assert False
-        concats_attr = tf.concat(2, [words, attrs])
+        concats_ent = tf.nn.tanh(tf.concat(2, [words, ents]))
+        concats_attr = tf.nn.tanh(tf.concat(2, [words, attrs]))
 
         # (batch, sent, 128)
-        hs, _ = tf.nn.dynamic_rnn(rnn_unit, words_, sequence_length=self.sent_len_ph, dtype=tf.float32)
+        hs, _ = tf.nn.dynamic_rnn(rnn_unit, words, sequence_length=self.sent_len_ph, dtype=tf.float32)
 
         score_func = attn_score(self.attn_score_func)
 
         # core flow
-        def compute_ctx_vec(batch_idx_and_sent_len):
+        def attention_layer(batch_idx_and_sent_len):
             idx, sent_len = batch_idx_and_sent_len[0], batch_idx_and_sent_len[1]
             # (sent, 128)
             trimmed_ent = concats_ent[idx, :sent_len, :]
             trimmed_attr = concats_attr[idx, :sent_len, :]
 
-            # attention weights (shape depends on sentence length)
-            attn_ent = score_func(tf.matmul(trimmed_ent, Wa_ent))
-            attn_attr = score_func(tf.matmul(trimmed_attr, Wa_attr))
+            # attention weights (shape depends on sentence length), (sent, 1)
+            alignment_ent = score_func(tf.matmul(trimmed_ent, Wa_ent))
+            alignment_attr = score_func(tf.matmul(trimmed_attr, Wa_attr))
+            alignment = tf.transpose(score_func(alignment_ent + alignment_attr))
 
-            # (1, sent) * (sent, n_filter)
-            attn = tf.transpose(attn_ent * attn_attr)
-            # print words[idx, :sent_len, :].get_shape()
-            # context vector (1, n_filter)
-            ctx_vec = tf.matmul(attn, hs[idx, :sent_len, :])
+            # (1, rnn_dim)
+            ctx_vec = tf.matmul(alignment, hs[idx, :sent_len, :])
 
             projected_ctx = tf.matmul(ctx_vec, Wp)
-            from_last = tf.matmul(tf.slice(hs[idx, :sent_len, :], [sent_len-1, 0], [1, -1]), Wx)
+            from_last = tf.matmul(tf.expand_dims(hs[idx, sent_len-1, :], [0]), Wx)
 
-            dst = tf.nn.tanh(projected_ctx + from_last)
-
-            return tf.tanh(tf.squeeze(dst, [0]))
+            return tf.squeeze(tf.nn.tanh(projected_ctx + from_last), [0])
 
         sequence = tf.stack([tf.range(self.b_size_ph), self.sent_len_ph], axis=1)
-        context_vec = tf.map_fn(compute_ctx_vec, sequence, dtype=tf.float32) # (batch, rnn_dim)
-        logits = tf.squeeze((tf.matmul(context_vec, Ws,) + bs)) # (batch, 3)
+        mapped = tf.map_fn(attention_layer, sequence, dtype=tf.float32) # (batch, rnn_dim)
+        logits = tf.squeeze((tf.matmul(mapped, Ws,))) # (batch, 3)
 
         sce = tf.nn.softmax_cross_entropy_with_logits(logits, self.y_ph)
 
