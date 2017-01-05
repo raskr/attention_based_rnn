@@ -8,8 +8,9 @@ from review import load_semeval_reviews
 from review import make_ent_attr_embedding
 import utils
 import constants
-from attention_based_rnn_experimental import AttentionBasedRNN
+# from qrnn import AttentionBasedRNN
 # from attention_based_rnn import AttentionBasedRNN
+from attention_based_rnn_experimental import AttentionBasedRNN
 
 word2idx, embedding_w, not_covered = utils.load_embedding_weights()
 max_vocab = len(embedding_w)
@@ -27,7 +28,8 @@ def train(hyper_params, sess):
     tuples = []
     for review in reviews:
         if len(review.tokens) <= 1:
-            ids = [0] + [word2idx[tok] for tok in review.tokens]
+            # ids = [0] + [word2idx[tok] for tok in review.tokens]
+            ids = [word2idx[tok] for tok in review.tokens]
         else:
             ids = [word2idx[tok] for tok in review.tokens]
         tuples_ = [(ids, ent2idx[op.ent], attr2idx[op.attr], polarity2idx[op.polarity]) for op in review.opinions]
@@ -58,7 +60,8 @@ def test(model, sess):
     tuples = []
     for review in reviews:
         if len(review.tokens) <= 1:
-            ids = [0] + [word2idx[tok] for tok in review.tokens]
+            # ids = [0] + [word2idx[tok] for tok in review.tokens]
+            ids = [word2idx[tok] for tok in review.tokens]
         else:
             ids = [word2idx[tok] for tok in review.tokens]
         tuples_ = [(ids, ent2idx[op.ent], attr2idx[op.attr], polarity2idx[op.polarity]) for op in review.opinions]
@@ -145,16 +148,18 @@ def random_search_cv(n_iter):
 
     sampler = list(ParameterSampler({
         'cell_clip': [None],
+        'dropout_keep': [0.6, 0.7, 0.8, 0.85, 0.9, None],
+        'prj_aspect': [True, False],
         'rnn_unit': ['BasicLSTM', 'LSTM', 'GRU'],
-        'attn_score_func': ['h_sigmoid'],
+        'attn_score_func': ['h_sigmoid', 'sigmoid'],
         'lr': np.exp(np.random.uniform(math.log(0.0006), math.log(0.005), 1024)),
         'w_decay_factor': [10 ** np.random.uniform(-5, -2) for _ in range(1024)],
-        'rnn_dim': [32, 64, 128, 200, 256, 512],
+        'rnn_dim': [32, 64, 128, 200, 256, 300, 400],
         'batch_size': [16, 32, 64],
         'n_filter': [64, 128, 200, 256, 512],
-        'ent_vec_dim': [32, 64, 128, 200, 256, 512],
+        'ent_vec_dim': [32, 64, 128, 200, 256, 512, 300, 400],
         'use_convolution': [True],
-        'attr_vec_dim': [32, 64, 128, 200, 256, 512],
+        'attr_vec_dim': [32, 64, 128, 200, 256, 512, 300, 400],
         'pool_len': [1],
         'filter_len': [3, 5]}, n_iter=n_iter))
 

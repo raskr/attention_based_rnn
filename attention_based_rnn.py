@@ -231,8 +231,7 @@ class AttentionBasedRNN(BaseEstimator):
 
             score_func = attn_score(self.attn_score_func)
 
-            # core flow
-            def compute_ctx_vec(batch_idx_and_sent_len):
+            def attention_layer(batch_idx_and_sent_len):
                 idx, sent_len = batch_idx_and_sent_len[0], batch_idx_and_sent_len[1]
                 trimmed_ent = concat_ent[idx, :sent_len, :]
                 trimmed_attr = concat_attr[idx, :sent_len, :]
@@ -260,7 +259,7 @@ class AttentionBasedRNN(BaseEstimator):
                 return tf.tanh(tf.squeeze(dst, [0]))
 
             sequence = tf.stack([tf.range(self.b_size_ph), self.sent_len_ph], axis=1)
-            context_vec = tf.map_fn(compute_ctx_vec, sequence, dtype=tf.float32) # (batch, rnn_dim)
+            context_vec = tf.map_fn(attention_layer, sequence, dtype=tf.float32) # (batch, rnn_dim)
             logits = tf.squeeze((tf.matmul(context_vec, Ws,))) # (batch, 3)
 
         sce = tf.nn.softmax_cross_entropy_with_logits(logits, self.y_ph)

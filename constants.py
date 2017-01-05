@@ -1,6 +1,6 @@
 import os
 
-max_sent_len = 40
+max_sent_len = 60
 word_vec_dim = 300
 n_entity = 6
 n_attr = 5
