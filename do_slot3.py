@@ -151,7 +151,7 @@ def random_search_cv(n_iter):
         'dropout_keep': [0.6, 0.7, 0.8, 0.85, 0.9, None],
         'prj_aspect': [True, False],
         'rnn_unit': ['BasicLSTM', 'LSTM', 'GRU'],
-        'attn_score_func': ['h_sigmoid', 'sigmoid'],
+        'attn_score_func': ['softmax', 'h_sigmoid', 'sigmoid'],
         'lr': np.exp(np.random.uniform(math.log(0.0006), math.log(0.005), 1024)),
         'w_decay_factor': [10 ** np.random.uniform(-5, -2) for _ in range(1024)],
         'rnn_dim': [32, 64, 128, 200, 256, 300, 400],
@@ -184,11 +184,17 @@ def random_search_cv(n_iter):
 
 
 if __name__ == '__main__':
-    random_search_cv(n_iter=256)
+    # random_search_cv(n_iter=256)
 
-    with open('cv_result.pkl', mode='rb') as f:
-        params = pickle.load(f)
-        print params
+    params = {'w_decay_factor': 0.0001, 'attn_score_func': 'h_sigmoid', 'attr_vec_dim': 300,
+              'prj_aspect': True,
+              'cell_clip': None, 'use_convolution': False, 'rnn_dim': 300, 'n_filter': 256,
+              'pool_len': 1, 'lr': 0.00086, 'batch_size': 32, 'filter_len': 3,
+              'ent_vec_dim': 300, 'rnn_unit': 'GRU'}
+
+    # with open('cv_result.pkl', mode='rb') as f:
+    #     params = pickle.load(f)
+    #     print params
 
     with tf.Session() as sess:
         model = train(params, sess)
